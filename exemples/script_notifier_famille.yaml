@@ -1,0 +1,46 @@
+# Script « Notifier la famille »
+# Paramètres → Automatisations et scènes → onglet Scripts → Créer → ⋮ → Modifier en YAML
+# Remplacez notify.mobile_app_TELEPHONE_1 par vos services (Paramètres → Appareils et services → Mobile App).
+alias: Notifier la famille
+mode: parallel
+fields:
+  titre:
+    name: Titre
+    required: true
+    selector:
+      text:
+  message:
+    name: Message
+    required: true
+    selector:
+      text:
+        multiline: true
+  critique:
+    name: Alerte critique
+    default: false
+    selector:
+      boolean:
+variables:
+  telephones:
+    - notify.mobile_app_TELEPHONE_1
+    # - notify.mobile_app_TELEPHONE_2
+sequence:
+  - repeat:
+      for_each: "{{ telephones }}"
+      sequence:
+        - action: "{{ repeat.item }}"
+          data:
+            title: "{{ titre }}"
+            message: "{{ message }}"
+            data:
+              tag: cuisiniere
+              image: /api/camera_proxy/camera.surveillance_cuisiniere_image_des_boutons
+              clickAction: "entityId:camera.surveillance_cuisiniere_image_des_boutons"
+              priority: high
+              ttl: 0
+              # Android : le canal « alarm_stream » sonne même en silencieux
+              # (autoriser « Ignorer Ne pas déranger » pour ce canal dans les réglages Android).
+              channel: "{{ 'alarm_stream' if (critique | default(false)) else 'Cuisiniere' }}"
+              actions:
+                - action: CUISINE_OK
+                  title: "C'est bon, j'ai éteint"

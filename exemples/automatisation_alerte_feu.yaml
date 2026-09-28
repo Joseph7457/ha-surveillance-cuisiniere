@@ -1,0 +1,65 @@
+# Automatisation « alerte feu oublié »
+# Feu allumé + personne depuis 10 min → notification ; pas de réaction 10 min plus tard → alerte critique (x6 max).
+# Nécessite le script « Notifier la famille ». Remplacez notify.mobile_app_TELEPHONE_1 en bas du fichier.
+alias: Cuisinière – alerte feu oublié
+mode: single
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.surveillance_cuisiniere_un_feu_allume
+    to: "on"
+    for: "00:10:00"
+  - trigger: state
+    entity_id: binary_sensor.surveillance_cuisiniere_presence_cuisine
+    to: "off"
+    for: "00:10:00"
+conditions:
+  - condition: state
+    entity_id: binary_sensor.surveillance_cuisiniere_un_feu_allume
+    state: "on"
+    for: "00:10:00"
+  - condition: state
+    entity_id: binary_sensor.surveillance_cuisiniere_presence_cuisine
+    state: "off"
+    for: "00:10:00"
+actions:
+  - action: script.notifier_la_famille
+    data:
+      titre: "🔥 Cuisinière allumée"
+      message: "Un feu est allumé et personne n'est dans la cuisine depuis 10 minutes."
+  - wait_for_trigger: &reaction
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: CUISINE_OK
+      - trigger: state
+        entity_id: binary_sensor.surveillance_cuisiniere_un_feu_allume
+        to: "off"
+      - trigger: state
+        entity_id: binary_sensor.surveillance_cuisiniere_presence_cuisine
+        to: "on"
+    timeout: "00:10:00"
+  - if:
+      - condition: template
+        value_template: "{{ wait.trigger is none }}"
+    then:
+      - repeat:
+          sequence:
+            - action: script.notifier_la_famille
+              data:
+                titre: "🚨 FEU OUBLIÉ"
+                message: "Un feu est allumé depuis plus de 20 minutes sans personne dans la cuisine !"
+                critique: true
+            - wait_for_trigger: *reaction
+              timeout: "00:05:00"
+          until:
+            - condition: template
+              value_template: "{{ wait.trigger is not none or repeat.index >= 6 }}"
+  - repeat:
+      for_each:
+        - notify.mobile_app_TELEPHONE_1
+      sequence:
+        - action: "{{ repeat.item }}"
+          data:
+            message: clear_notification
+            data:
+              tag: cuisiniere

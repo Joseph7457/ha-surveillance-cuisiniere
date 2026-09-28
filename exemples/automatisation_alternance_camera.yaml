@@ -1,0 +1,35 @@
+# Automatisation « alternance caméra » (caméras motorisées avec positions mémorisées)
+# Créez deux positions dans l'app de la caméra : « boutons » et « piece » (tapez les noms, sans suggestion du clavier).
+# Remplacez select.CAMERA_move_to_preset par l'entité de votre caméra.
+alias: Cuisinière – alternance caméra
+mode: restart
+triggers:
+  - trigger: state
+    entity_id: binary_sensor.surveillance_cuisiniere_un_feu_allume
+    to: ["on", "off"]
+  - trigger: homeassistant
+    event: start
+actions:
+  - repeat:
+      while:
+        - condition: state
+          entity_id: binary_sensor.surveillance_cuisiniere_un_feu_allume
+          state: "on"
+      sequence:
+        - action: select.select_option
+          target:
+            entity_id: select.CAMERA_move_to_preset
+          data:
+            option: boutons
+        - delay: "00:00:15"
+        - action: select.select_option
+          target:
+            entity_id: select.CAMERA_move_to_preset
+          data:
+            option: piece
+        - delay: "00:00:45"
+  - action: select.select_option
+    target:
+      entity_id: select.CAMERA_move_to_preset
+    data:
+      option: boutons

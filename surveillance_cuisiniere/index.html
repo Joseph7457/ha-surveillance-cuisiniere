@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Surveillance cuisinière</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --tx:#1c1f24; --mut:#667085; --bd:#d9dde3; --acc:#0b72c6; --ok:#1f9d55; --on:#d92d20; --wa:#dc8a00; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#16181c; --card:#1f2228; --tx:#e7e9ec; --mut:#9aa3af; --bd:#343944; --acc:#4ea3ec; } }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--tx); }
+  main { max-width:1200px; margin:0 auto; padding:16px; }
+  h1 { font-size:20px; margin:0 0 12px; }
+  .tabs button { border:1px solid var(--bd); background:var(--card); color:var(--tx); padding:8px 14px; border-radius:8px; cursor:pointer; margin-right:6px; }
+  .tabs button.sel { background:var(--acc); border-color:var(--acc); color:#fff; }
+  .card { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:14px; margin-top:12px; }
+  .row { display:flex; gap:16px; flex-wrap:wrap; }
+  .grow { flex:1 1 600px; min-width:0; }
+  .side { flex:0 0 280px; }
+  img, canvas { max-width:100%; border-radius:6px; display:block; }
+  canvas { cursor:crosshair; touch-action:none; }
+  .pill { display:inline-block; padding:2px 10px; border-radius:99px; font-weight:600; font-size:13px; }
+  .eteint { background:#1f9d5522; color:var(--ok); } .allume { background:#d92d2022; color:var(--on); }
+  .inconnu { background:#dc8a0022; color:var(--wa); }
+  table { border-collapse:collapse; width:100%; } td { padding:6px 4px; border-bottom:1px solid var(--bd); }
+  ol { padding-left:20px; margin:6px 0; } li { padding:3px 6px; border-radius:6px; cursor:pointer; }
+  li.cur { background:var(--acc); color:#fff; } li.done::after { content:" ✓"; color:var(--ok); } li.cur.done::after { color:#fff; }
+  .btn { border:0; background:var(--acc); color:#fff; padding:9px 14px; border-radius:8px; cursor:pointer; font-size:14px; margin:4px 4px 0 0; }
+  .btn.sec { background:transparent; color:var(--tx); border:1px solid var(--bd); }
+  .msg { margin-top:10px; font-size:14px; } .err { color:var(--on); } .good { color:var(--ok); }
+  .mut { color:var(--mut); font-size:13px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Surveillance de la cuisinière</h1>
+  <div class="tabs"><button id="tLive" class="sel">Direct</button><button id="tDraw">Dessiner les zones</button></div>
+
+  <section id="live" class="card">
+    <div class="row">
+      <div class="grow"><img id="ann" alt="Détection en direct"></div>
+      <div class="side">
+        <div id="pos" class="mut"></div>
+        <table id="tbl"></table>
+        <p class="mut">« État » est l'état retenu (après anti-rebond). « Vu » est ce que la caméra voit à l'instant. Quand la caméra regarde la pièce, l'état reste le dernier connu.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="draw" class="card" hidden>
+    <div class="row">
+      <div class="grow"><label class="mut"><input type="checkbox" id="zoom"> Agrandir l'image (plus précis pour les petits rectangles)</label><div id="cvWrap" style="overflow:auto;max-height:80vh;margin-top:6px"><canvas id="cv"></canvas></div></div>
+      <div class="side">
+        <b>Avant de commencer</b>
+        <p class="mut">Mettez la caméra sur la position « boutons », <b>tous les boutons sur OFF</b>, rien devant. Puis suivez les étapes (cliquez sur une étape pour la refaire).</p>
+        <label>Nombre de boutons : <input id="nb" type="number" min="1" max="6" value="4" style="width:50px"></label>
+        <ol id="steps"></ol>
+        <p class="mut" id="hint"></p>
+        <button class="btn sec" id="bSnap">Nouvelle image</button>
+        <button class="btn sec" id="bClear">Tout effacer</button>
+        <button class="btn" id="bSave">Enregistrer</button>
+        <div class="msg" id="msg"></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let tab = 'live';
+$('tLive').onclick = () => show('live'); $('tDraw').onclick = () => show('draw');
+function show(t) {
+  tab = t; $('live').hidden = t !== 'live'; $('draw').hidden = t !== 'draw';
+  $('tLive').classList.toggle('sel', t === 'live'); $('tDraw').classList.toggle('sel', t === 'draw');
+  if (t === 'draw') snap();
+}
+
+// ---------- Direct ----------
+const cls = t => t === 'éteint' ? 'eteint' : t === 'allumé' ? 'allume' : 'inconnu';
+async function refresh() {
+  if (tab === 'live') {
+    $('ann').src = 'annotated.jpg?t=' + Date.now();
+    try {
+      const s = await (await fetch('status')).json();
+      const pos = !s.calibre ? 'Pas encore calibré : allez dans « Dessiner les zones ».'
+        : !s.flux_connecte ? 'Caméra injoignable…'
+        : s.position === 'boutons' ? 'La caméra regarde les boutons.' : 'La caméra regarde ailleurs (états figés).';
+      const pr = s.dernier_mouvement == null ? 'aucun mouvement vu depuis le démarrage' : (s.presence ? 'quelqu\'un est là' : 'personne') + ' (dernier mouvement il y a ' + (s.dernier_mouvement < 120 ? s.dernier_mouvement + ' s' : Math.round(s.dernier_mouvement / 60) + ' min') + ')';
+      $('pos').textContent = pos + ' Présence : ' + pr + '.';
+      $('tbl').innerHTML = '<tr><td></td><td>État</td><td>Vu</td></tr>' + s.boutons.map((b, i) =>
+        `<tr><td>Feu ${i + 1}</td><td><span class="pill ${cls(b.etat)}">${b.etat}</span></td><td><span class="pill ${cls(b.vision)}">${b.vision}</span></td></tr>`).join('');
+    } catch (e) {}
+  }
+  setTimeout(refresh, 1000);
+}
+refresh();
+
+// ---------- Dessin ----------
+const cv = $('cv'), ctx = cv.getContext('2d'), img = new Image();
+let data = { refs: [null, null], boutons: [] }, cur = 0, drag = null;
+function nb() { return Math.max(1, Math.min(6, +$('nb').value || 4)); }
+function stepList() {
+  const s = [{ k: 'ref', i: 0, t: 'Repère gauche : cliquez sur la pastille' }, { k: 'ref', i: 1, t: 'Repère droit : cliquez sur la pastille' }];
+  for (let i = 0; i < nb(); i++) {
+    s.push({ k: 'zone', i, t: `Bouton ${i + 1} : rectangle autour du bouton entier` });
+    s.push({ k: 'off', i, t: `Bouton ${i + 1} : petit rectangle autour de la pastille (OFF)` });
+  }
+  return s;
+}
+function isDone(s) { return s.k === 'ref' ? !!data.refs[s.i] : !!(data.boutons[s.i] || {})[s.k]; }
+function renderSteps() {
+  const s = stepList();
+  $('steps').innerHTML = s.map((x, j) => `<li data-j="${j}" class="${j === cur ? 'cur' : ''} ${isDone(x) ? 'done' : ''}">${x.t}</li>`).join('');
+  [...$('steps').children].forEach(li => li.onclick = () => { cur = +li.dataset.j; renderSteps(); draw(); });
+  const c = s[cur];
+  $('hint').textContent = !c ? 'Tout est dessiné : cliquez sur Enregistrer.' : c.k === 'ref' ? 'Un clic sur la pastille.'
+    : c.k === 'zone' ? "Glissez un rectangle qui contient tout le cercle parcouru par la pastille quand on tourne le bouton, sans toucher les boutons voisins."
+    : 'Glissez un rectangle un peu plus grand que la pastille, dans sa position OFF.';
+}
+$('nb').onchange = () => { data.boutons.length = nb(); cur = Math.min(cur, stepList().length); renderSteps(); draw(); };
+
+function snap() { img.onload = () => { cv.width = img.naturalWidth; cv.height = img.naturalHeight; draw(); }; img.src = 'snapshot.jpg?t=' + Date.now(); }
+$('bSnap').onclick = snap;
+$('zoom').onchange = () => { cv.style.maxWidth = $('zoom').checked ? 'none' : '100%'; cv.style.width = $('zoom').checked ? '250%' : ''; };
+$('bClear').onclick = () => { data = { refs: [null, null], boutons: [] }; cur = 0; renderSteps(); draw(); };
+
+function rectPx(r) { return [r[0] * cv.width, r[1] * cv.height, r[2] * cv.width, r[3] * cv.height]; }
+function draw() {
+  if (!img.naturalWidth) return;
+  ctx.drawImage(img, 0, 0);
+  ctx.lineWidth = 2; ctx.font = 'bold 16px system-ui';
+  data.refs.forEach((r, i) => { if (!r) return; ctx.strokeStyle = '#00c8ff'; ctx.beginPath(); ctx.arc(r[0] * cv.width, r[1] * cv.height, 14, 0, 7); ctx.stroke(); ctx.fillStyle = '#00c8ff'; ctx.fillText(i ? 'D' : 'G', r[0] * cv.width + 16, r[1] * cv.height); });
+  data.boutons.forEach((b, i) => {
+    if (!b) return;
+    if (b.zone) { ctx.strokeStyle = '#bbb'; ctx.strokeRect(...rectPx(b.zone)); ctx.fillStyle = '#fff'; const p = rectPx(b.zone); ctx.fillText(i + 1, p[0] + 4, p[1] + 18); }
+    if (b.off) { ctx.strokeStyle = '#2ecc71'; ctx.strokeRect(...rectPx(b.off)); }
+  });
+  if (drag) { ctx.strokeStyle = '#ff0'; ctx.setLineDash([6, 4]); ctx.strokeRect(drag.x0, drag.y0, drag.x1 - drag.x0, drag.y1 - drag.y0); ctx.setLineDash([]); }
+}
+function pt(e) { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * cv.width / r.width, (e.clientY - r.top) * cv.height / r.height]; }
+cv.onpointerdown = e => {
+  const s = stepList()[cur]; if (!s) return; const [x, y] = pt(e);
+  if (s.k === 'ref') { data.refs[s.i] = [x / cv.width, y / cv.height]; next(); return; }
+  drag = { x0: x, y0: y, x1: x, y1: y }; cv.setPointerCapture(e.pointerId);
+};
+cv.onpointermove = e => { if (!drag) return; [drag.x1, drag.y1] = pt(e); draw(); };
+cv.onpointerup = () => {
+  if (!drag) return; const s = stepList()[cur];
+  const x = Math.min(drag.x0, drag.x1), y = Math.min(drag.y0, drag.y1), w = Math.abs(drag.x1 - drag.x0), h = Math.abs(drag.y1 - drag.y0);
+  drag = null;
+  if (w < 5 || h < 5) { draw(); return; }
+  data.boutons[s.i] = data.boutons[s.i] || {};
+  data.boutons[s.i][s.k] = [x / cv.width, y / cv.height, w / cv.width, h / cv.height];
+  next();
+};
+function next() { const s = stepList(); let j = cur + 1; while (j < s.length && isDone(s[j])) j++; cur = j; renderSteps(); draw(); }
+
+$('bSave').onclick = async () => {
+  const s = stepList(); const missing = s.filter(x => !isDone(x));
+  if (missing.length) { $('msg').innerHTML = '<span class="err">Il manque : ' + missing.map(x => x.t).join(' ; ') + '</span>'; return; }
+  $('msg').textContent = 'Vérification sur l\'image actuelle de la caméra…';
+  const r = await (await fetch('calibration', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refs: data.refs, boutons: data.boutons.slice(0, nb()) }) })).json();
+  $('msg').innerHTML = r.ok ? '<span class="good">Enregistré ! Regardez l\'onglet Direct : les 4 feux doivent être « éteint ».</span>'
+    : '<span class="err">' + r.erreurs.join('<br>') + '</span>';
+};
+
+(async () => {
+  try {
+    const c = await (await fetch('calibration')).json();
+    if (c.refs) {
+      data.refs = c.refs.map(r => [r.x, r.y]);
+      data.boutons = c.boutons.map(b => ({ zone: b.zone, off: b.off }));
+      $('nb').value = c.boutons.length; cur = stepList().length;
+    }
+  } catch (e) {}
+  renderSteps();
+})();
+</script>
+</body>
+</html>
