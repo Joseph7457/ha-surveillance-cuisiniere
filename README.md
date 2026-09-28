@@ -147,5 +147,5 @@ Idées, retours d'expérience et contributions bienvenus via les *Issues*.
 
 ## Licence
 
-[GPL-3.0](LICENSE) — vous pouvez utiliser, modifier et redistribuer ce projet ; les versions modifiées
-redistribuées doivent rester sous la même licence.
+[AGPL-3.0](LICENSE) — vous pouvez utiliser, modifier et redistribuer ce projet ; les versions modifiées
+redistribuées, **y compris proposées comme service en ligne**, doivent rester sous la même licence et publier leur code.
